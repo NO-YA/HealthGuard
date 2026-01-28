@@ -3,15 +3,18 @@ Flask==3.0.0
 gunicorn==22.0.0
 flask-cors==4.0.0
 
-# Machine Learning & Data
-tensorflow-cpu==2.16.0
+# Machine Learning & Data (TensorFlow Lite optimized)
+tensorflow==2.16.0
 numpy==2.0.0
 opencv-python-headless==4.10.1.26
 Pillow==10.2.0
+scipy==1.12.0
+tflite-runtime==2.16.0
 
-# Base de Données
+# Base de Données (MongoDB preferred, PostgreSQL as alternative)
 pymongo==4.7.2
 mongoengine==0.27.0
+# psycopg2-binary==2.9.9  # Uncomment for PostgreSQL
 
 # Validation & Serialization
 pydantic==2.6.0
@@ -31,9 +34,15 @@ cryptography==42.0.0
 # Tests & Quality
 pytest==8.0.0
 pytest-cov==4.1.0
+pytest-mock==3.12.0
 black==24.1.1
 flake8==7.0.0
 mypy==1.8.0
 
+# Azure Integration
+azure-identity==1.15.0
+azure-monitor-opentelemetry==1.1.1
+
 # Utils
 redis==5.0.1
+requests==2.31.0
