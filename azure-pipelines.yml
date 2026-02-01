@@ -15,6 +15,10 @@ variables:
   resourceGroupName: 'healthguard-rg'
   containerAppName: 'healthguard-api'
   environment: 'staging'
+  acrUsername: 'healthguardacr'
+  acrPassword: '$(ACR_PASSWORD)'
+  MONGO_URI_STAGING: '$(MONGO_URI_STAGING_SECRET)'
+  MONGO_URI_PROD: '$(MONGO_URI_PROD_SECRET)'
 
 stages:
   # STAGE 1: BUILD & TEST
@@ -115,7 +119,6 @@ stages:
                         --image $(containerRegistry)/$(imageRepository):$(tag) \
                         --cpu 1 \
                         --memory 1.5 \
-                        --registry-login-server $(containerRegistry) \
                         --registry-username $(acrUsername) \
                         --registry-password $(acrPassword) \
                         --environment-variables \
@@ -186,7 +189,6 @@ stages:
                         --image $(containerRegistry)/$(imageRepository):$(tag) \
                         --cpu 2 \
                         --memory 2 \
-                        --registry-login-server $(containerRegistry) \
                         --registry-username $(acrUsername) \
                         --registry-password $(acrPassword) \
                         --environment-variables \
