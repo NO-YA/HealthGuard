@@ -1,21 +1,11 @@
 version: "3.8"
 
 services:
-  api:
-    build: .
-    container_name: healthguard-api
-    ports:
-      - "5000:5000"
-    env_file: .env
-    restart: unless-stopped
-    depends_on:
-      - mongodb
-    networks:
-      - healthguard
-
   mongodb:
     image: mongo:7.0
     container_name: healthguard-mongo
+    ports:
+      - "27017:27017"
     env_file: .env
     volumes:
       - mongodb_data:/data/db
@@ -25,10 +15,27 @@ services:
   redis:
     image: redis:7-alpine
     container_name: healthguard-redis
+    ports:
+      - "6379:6379"
     networks:
       - healthguard
     profiles:
       - with-cache
+
+  api:
+    build: .
+    container_name: healthguard-api
+    ports:
+      - "5000:5000"
+    env_file: .env
+    volumes:
+      - ./backend/app:/app/backend/app
+      - ./ml:/app/ml
+    depends_on:
+      - mongodb
+    networks:
+      - healthguard
+    command: flask --app backend.app.main run --host=0.0.0.0 --port=5000 --reload
 
 volumes:
   mongodb_data:
