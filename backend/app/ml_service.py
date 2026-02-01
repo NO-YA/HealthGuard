@@ -3,7 +3,7 @@ class MLService:
     """Service qui simule l'analyse ML"""
     
     def analyze_image(self, image_path):
-        """Simule l'analyse d'une image médicale"""
+        """Simule l'analyse d'une image médicale (chemin de fichier)."""
         # Jour 1: Simulation simple
         # Jour 3: Remplacer par du vrai TensorFlow
         
@@ -24,3 +24,8 @@ class MLService:
                 "Schedule a blood test"
             ]
         }
+
+    def analyze_bytes(self, image_bytes):
+        """Simule l'analyse à partir d'octets d'image (pour tests sans écrire sur disque)."""
+        # Pour l'instant, on réutilise la simulation existante.
+        return self.analyze_image(None)
