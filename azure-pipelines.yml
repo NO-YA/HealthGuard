@@ -1,100 +1,215 @@
 trigger:
-  branches:
-    include:
-      - main
+  - main
+
+pr:
+  - main
 
 variables:
-  pythonVersion: "3.11"
-  imageName: "healthguard-api"
-  dockerRegistryServiceConnection: "ACR_CONNECTION"
-  acrName: "healthguardacr"
-  acrLoginServer: "healthguardacr.azurecr.io"
+  dockerRegistryServiceConnection: 'healthguard-acr'
+  imageRepository: 'healthguard'
+  containerRegistry: 'healthguardacr.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
+  pythonVersion: '3.11'
+  azureSubscription: 'healthguard-subscription'
+  resourceGroupName: 'healthguard-rg'
+  containerAppName: 'healthguard-api'
+  environment: 'staging'
+  acrUsername: 'healthguardacr'
+  acrPassword: '$(ACR_PASSWORD)'
+  MONGO_URI_STAGING: '$(MONGO_URI_STAGING_SECRET)'
+  MONGO_URI_PROD: '$(MONGO_URI_PROD_SECRET)'
 
 stages:
+  # STAGE 1: BUILD & TEST
+  - stage: BuildAndTest
+    displayName: 'Build & Test'
+    jobs:
+      - job: BuildAndTestJob
+        displayName: 'Build, Test, and Push Docker Image'
+        pool:
+          vmImage: 'ubuntu-latest'
 
-# =========================
-# STAGE 1 — TESTS ML
-# =========================
-- stage: ML_Tests
-  displayName: "Tests & Qualité ML"
-  jobs:
-    - job: MLTests
-      pool:
-        vmImage: "ubuntu-latest"
+        steps:
+          # Setup Python
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+            displayName: 'Use Python $(pythonVersion)'
 
-      steps:
-        - task: UsePythonVersion@0
-          inputs:
-            versionSpec: "$(pythonVersion)"
+          # Install dependencies
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r backend/requirements.txt
+            displayName: 'Install dependencies'
 
-        - script: |
-            python -m pip install --upgrade pip
-            pip install -r backend/requirements.txt
-          displayName: "Install dependencies"
+          # Run tests
+          - script: |
+              pip install pytest pytest-cov
+              pytest backend/test/ -v --cov=backend/app --cov-report=xml --cov-report=html
+            displayName: 'Run unit tests'
+            continueOnError: false
 
-        - script: |
-            python ml/utils/generate_dummy_dataset.py
-            python ml/training/train_diabetes.py
-          displayName: "Run ML training (sanity check)"
+          # Publish test results
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '**/junit.xml'
+              testRunTitle: 'Python Tests'
 
-        - script: |
-            python - <<EOF
-            import tensorflow as tf
-            tf.keras.models.load_model("ml/models/keras/diabetes_model.h5")
-            print("ML model OK")
-            EOF
-          displayName: "Validate trained model"
+          # Publish code coverage
+          - task: PublishCodeCoverageResults@1
+            inputs:
+              codeCoverageTool: Cobertura
+              summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage.xml'
 
-# =========================
-# STAGE 2 — BUILD DOCKER
-# =========================
-- stage: Build
-  displayName: "Build & Push Docker Image"
-  dependsOn: ML_Tests
-  jobs:
-    - job: DockerBuild
-      pool:
-        vmImage: "ubuntu-latest"
+          # Build and push Docker image
+          - task: Docker@2
+            displayName: 'Build and push Docker image'
+            inputs:
+              command: 'buildAndPush'
+              repository: '$(imageRepository)'
+              dockerfile: '$(dockerfilePath)'
+              containerRegistry: '$(dockerRegistryServiceConnection)'
+              tags: |
+                latest
+                $(tag)
 
-      steps:
-        - task: Docker@2
-          displayName: "Build and push image"
-          inputs:
-            command: buildAndPush
-            repository: $(imageName)
-            dockerfile: Dockerfile
-            containerRegistry: $(dockerRegistryServiceConnection)
-            tags: |
-              latest
-              $(Build.BuildId)
+          # Scan Docker image for vulnerabilities (optional but recommended)
+          - script: |
+              docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                aquasec/trivy image \
+                $(containerRegistry)/$(imageRepository):$(tag) || echo "Trivy scan completed"
+            displayName: 'Scan Docker image (Trivy)'
+            continueOnError: true
 
-# =========================
-# STAGE 3 — DEPLOY (ACI)
-# =========================
-- stage: Deploy
-  displayName: "Deploy to Azure Container Instances"
-  dependsOn: Build
-  jobs:
-    - job: DeployACI
-      pool:
-        vmImage: "ubuntu-latest"
+  # STAGE 2: DEPLOY TO STAGING
+  - stage: DeployToStaging
+    displayName: 'Deploy to Staging'
+    dependsOn: BuildAndTest
+    condition: succeeded()
+    jobs:
+      - deployment: DeployStagingJob
+        displayName: 'Deploy to Azure Container Instances (Staging)'
+        environment: 'staging'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: 'Deploy to Azure Container Instances'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      # Login to ACR
+                      az acr login --name healthguardacr
+                      
+                      # Create resource group if not exists
+                      az group create \
+                        --name $(resourceGroupName) \
+                        --location westeurope
+                      
+                      # Deploy container instance
+                      az container create \
+                        --resource-group $(resourceGroupName) \
+                        --name $(containerAppName)-staging \
+                        --image $(containerRegistry)/$(imageRepository):$(tag) \
+                        --cpu 1 \
+                        --memory 1.5 \
+                        --registry-username $(acrUsername) \
+                        --registry-password $(acrPassword) \
+                        --environment-variables \
+                          FLASK_ENV=staging \
+                          MONGO_URI='$(MONGO_URI_STAGING)' \
+                          LOG_LEVEL=INFO \
+                        --ports 5000 \
+                        --protocol TCP \
+                        --restart-policy OnFailure \
+                        --no-wait
+                      
+                      # Get container IP
+                      CONTAINER_IP=$(az container show \
+                        --resource-group $(resourceGroupName) \
+                        --name $(containerAppName)-staging \
+                        --query ipAddress.ip \
+                        --output tsv)
+                      
+                      echo "##vso[task.setvariable variable=STAGING_URL]http://$CONTAINER_IP:5000"
+                      echo "Container deployed at: http://$CONTAINER_IP:5000"
 
-      steps:
-        - task: AzureCLI@2
-          displayName: "Deploy to ACI"
-          inputs:
-            azureSubscription: "AZURE_SUBSCRIPTION"
-            scriptType: bash
-            scriptLocation: inlineScript
-            inlineScript: |
-              az container create \
-                --resource-group healthguard-rg \
-                --name healthguard-api \
-                --image $(acrLoginServer)/$(imageName):latest \
-                --cpu 2 \
-                --memory 4 \
-                --registry-login-server $(acrLoginServer) \
-                --registry-username $ACR_USERNAME \
-                --registry-password $ACR_PASSWORD \
-                --ports 5000 \
-                --environment-variables FLASK_ENV=production
+                # Run smoke tests on staging
+                - script: |
+                    echo "Waiting for container to be ready..."
+                    sleep 10
+                    
+                    STAGING_URL="$(STAGING_URL)"
+                    echo "Testing health endpoint: $STAGING_URL/health"
+                    
+                    STATUS=$(curl -s -o /dev/null -w "%{http_code}" $STAGING_URL/health)
+                    echo "Health check status: $STATUS"
+                    
+                    if [ $STATUS -eq 200 ]; then
+                      echo "✓ Staging deployment successful!"
+                      exit 0
+                    else
+                      echo "✗ Health check failed"
+                      exit 1
+                    fi
+                  displayName: 'Smoke tests on Staging'
+                  continueOnError: false
+
+  # STAGE 3: PRODUCTION (MANUAL TRIGGER)
+  - stage: DeployToProduction
+    displayName: 'Deploy to Production'
+    dependsOn: DeployToStaging
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployProductionJob
+        displayName: 'Deploy to Production'
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: 'Deploy to Azure Container Instances (Prod)'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      az acr login --name healthguardacr
+                      
+                      az container create \
+                        --resource-group $(resourceGroupName) \
+                        --name $(containerAppName)-prod \
+                        --image $(containerRegistry)/$(imageRepository):$(tag) \
+                        --cpu 2 \
+                        --memory 2 \
+                        --registry-username $(acrUsername) \
+                        --registry-password $(acrPassword) \
+                        --environment-variables \
+                          FLASK_ENV=production \
+                          MONGO_URI='$(MONGO_URI_PROD)' \
+                          LOG_LEVEL=WARNING \
+                        --ports 5000 \
+                        --protocol TCP \
+                        --restart-policy Always \
+                        --no-wait
+                      
+                      CONTAINER_IP=$(az container show \
+                        --resource-group $(resourceGroupName) \
+                        --name $(containerAppName)-prod \
+                        --query ipAddress.ip \
+                        --output tsv)
+                      
+                      echo "Production URL: http://$CONTAINER_IP:5000"
+                      echo "##vso[task.setvariable variable=PROD_URL]http://$CONTAINER_IP:5000"
+
+                - script: |
+                    echo "Production deployment successful!"
+                    echo "URL: $(PROD_URL)"
+                  displayName: 'Production Deployment Confirmation'

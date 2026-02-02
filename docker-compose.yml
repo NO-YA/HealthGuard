@@ -1,37 +1,83 @@
-version: "3.8"
+version: '3.8'
 
 services:
-  api:
-    build: .
-    container_name: healthguard-api
-    ports:
-      - "5000:5000"
-    env_file: .env
-    restart: unless-stopped
-    depends_on:
-      - mongodb
-    networks:
-      - healthguard
-
+  # MongoDB Database
   mongodb:
     image: mongo:7.0
     container_name: healthguard-mongo
-    env_file: .env
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: healthguard
     volumes:
       - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
     networks:
       - healthguard
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # Redis Cache (optionnel)
   redis:
     image: redis:7-alpine
     container_name: healthguard-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     networks:
       - healthguard
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     profiles:
       - with-cache
 
+  # Flask API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: healthguard-api
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_ENV: development
+      FLASK_DEBUG: "True"
+      MONGO_URI: mongodb://admin:password@mongodb:27017/healthguard?authSource=admin
+      MONGO_DB_NAME: healthguard
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+      REDIS_URL: redis://redis:6379/0
+      REDIS_ENABLED: "False"
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/test:/app/test
+      - ./ml:/app/ml
+      - ./logs:/app/logs
+    networks:
+      - healthguard
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
 volumes:
   mongodb_data:
+  mongodb_config:
+  redis_data:
 
 networks:
   healthguard:
