@@ -1,4 +1,3 @@
-cat > backend/app/ml_service.py << 'EOF'
 """Machine Learning service"""
 from pathlib import Path
 import numpy as np
@@ -77,4 +76,3 @@ class MLService:
         image = image.astype(np.float32) / 255.0
         
         return image
-EOF

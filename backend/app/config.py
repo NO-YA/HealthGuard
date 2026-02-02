@@ -1,4 +1,3 @@
-cat > backend/app/config.py << 'EOF'
 """Flask configuration"""
 import os
 from dotenv import load_dotenv
@@ -44,4 +43,3 @@ class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
     TESTING = False
-EOF

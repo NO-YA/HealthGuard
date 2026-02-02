@@ -1,4 +1,3 @@
-cat > backend/app/__init__.py << 'EOF'
 """Flask app factory"""
 from flask import Flask
 from flask_cors import CORS
@@ -68,4 +67,3 @@ def _init_mongodb(app):
     except Exception as e:
         app.logger.error(f"MongoDB connection error: {e}")
         raise
-EOF
