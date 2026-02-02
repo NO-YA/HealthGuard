@@ -1,3 +1,4 @@
+
 import io
 import time
 import threading
@@ -5,26 +6,30 @@ import logging
 import numpy as np
 from PIL import Image
 
-# Import tflite runtime if available; allows tests to inject a mock interpreter
+# Import tflite runtime if available, else fallback to tensorflow.lite
 try:
-    import tflite_runtime.interpreter as tflite  # type: ignore
-except Exception:
-    tflite = None
+    import tflite_runtime.interpreter as tflite
+    TFLITE_BACKEND = 'tflite-runtime'
+except ImportError:
+    try:
+        import tensorflow as tf
+        tflite = tf.lite
+        TFLITE_BACKEND = 'tensorflow'
+    except ImportError:
+        tflite = None
+        TFLITE_BACKEND = None
 
 logger = logging.getLogger(__name__)
 
 
-class MLService:
-    """Service d'inférence TFLite robuste.
 
-    - Permet l'injection d'une classe d'interpreter (interpreter_cls) pour les tests.
-    - Gère quantization, shapes dynamiques, thread-safety et logging.
-    """
+class MLService:
+    """Service d'inférence TFLite robuste (tflite-runtime ou tensorflow)."""
 
     def __init__(self, model_path: str = "ml/anemia/model.tflite", interpreter_cls=None, warmup: bool = False):
         if interpreter_cls is None:
             if tflite is None:
-                raise RuntimeError("tflite runtime is not installed. Install tflite-runtime or pass interpreter_cls for tests.")
+                raise RuntimeError("Aucun backend TFLite disponible. Installez tflite-runtime ou tensorflow, ou passez interpreter_cls pour les tests.")
             interpreter_cls = tflite.Interpreter
 
         self.model_path = model_path
@@ -52,7 +57,7 @@ class MLService:
             except Exception:
                 logger.debug("Warmup failed; continuing without warmup", exc_info=True)
 
-        logger.info("MLService initialized (model=%s)", model_path)
+        logger.info(f"MLService initialized (model={model_path}, backend={TFLITE_BACKEND})")
 
     def _softmax(self, x: np.ndarray) -> np.ndarray:
         e = np.exp(x - np.max(x))
@@ -117,12 +122,21 @@ class MLService:
         # --- Output post-processing ---
         output = np.squeeze(output)
 
-        # If output appears to be logits, apply softmax
-        probs = None
-        if output.ndim == 1 and not np.all((0 <= output) & (output <= 1)):
-            probs = self._softmax(output)
-        else:
+        # Gestion des sorties vides ou scalaires
+        if output.size == 0:
+            raise RuntimeError("Le modèle a retourné une sortie vide. Vérifiez l'entraînement ou l'architecture.")
+        if output.ndim == 0:
+            # Sortie scalaire : transformer en tableau
+            probs = np.array([float(output)])
+        elif output.ndim == 1:
             probs = np.asarray(output, dtype=np.float32)
+        else:
+            # Sortie inattendue
+            raise RuntimeError(f"Sortie du modèle inattendue: shape={output.shape}")
+
+        # Si output semble être des logits, appliquer softmax
+        if probs.ndim == 1 and not np.all((0 <= probs) & (probs <= 1)):
+            probs = self._softmax(probs)
 
         idx = int(np.argmax(probs))
         confidence = float(probs[idx])
@@ -139,15 +153,18 @@ class MLService:
 
         logger.info(
             "Inference done | label=%s confidence=%.2f latency=%dms",
-            self.labels[idx], confidence, latency_ms
+            self.labels[idx] if idx < len(self.labels) else str(idx), confidence, latency_ms
         )
 
         return {
-            "condition": "anemia",
-            "label": self.labels[idx],
-            "risk_level": risk,
-            "confidence": round(confidence, 2),
-            "latency_ms": latency_ms,
-            "recommendation": "Blood test recommended",
-            "raw": probs.tolist()
+            "diagnosis": {
+                "condition": "anemia" if idx == 1 else "normal",
+                "label": self.labels[idx] if idx < len(self.labels) else str(idx),
+                "confidence": round(confidence, 2),
+                "risk_level": risk,
+                "recommendation": "Blood test recommended" if idx == 1 else "No anemia detected",
+                "raw_output": probs.tolist(),
+                "latency_ms": latency_ms
+            },
+            "description": "Analyse automatique d'image pour la détection de l'anémie. Les résultats sont à interpréter par un professionnel de santé."
         }

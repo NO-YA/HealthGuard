@@ -6,23 +6,22 @@ from .ml_service import MLService, tflite as tflite_runtime
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
+class DummyMLService:
+    def analyze_bytes(self, image_bytes):
+        return {
+            "condition": "anemia",
+            "label": "anemia",
+            "risk_level": "medium",
+            "confidence": 0.8,
+            "latency_ms": 0,
+            "recommendation": "Blood test recommended",
+            "raw": [0.2, 0.8],
+        }
+
 try:
     ml_service = MLService()
-except RuntimeError:
-    logger.warning("tflite runtime not available, falling back to DummyMLService for predict endpoint")
-
-    class DummyMLService:
-        def analyze_bytes(self, image_bytes):
-            return {
-                "condition": "anemia",
-                "label": "anemia",
-                "risk_level": "medium",
-                "confidence": 0.8,
-                "latency_ms": 0,
-                "recommendation": "Blood test recommended",
-                "raw": [0.2, 0.8],
-            }
-
+except Exception as e:
+    logger.warning(f"MLService indisponible ({e}), fallback DummyMLService pour l'API.")
     ml_service = DummyMLService()
 
 RESULTS = []
@@ -70,8 +69,7 @@ def get_results():
 @app.route('/', methods=['GET'])
 def serve_frontend():
     try:
-        root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        index_path = os.path.join(root, 'frontend', 'index.html')
+        index_path = '/app/frontend/index.html'
         with open(index_path, 'r', encoding='utf-8') as f:
             return f.read(), 200, {'Content-Type': 'text/html'}
     except Exception:
