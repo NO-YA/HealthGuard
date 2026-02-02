@@ -1,0 +1,100 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  pythonVersion: "3.11"
+  imageName: "healthguard-api"
+  dockerRegistryServiceConnection: "ACR_CONNECTION"
+  acrName: "healthguardacr"
+  acrLoginServer: "healthguardacr.azurecr.io"
+
+stages:
+
+# =========================
+# STAGE 1 — TESTS ML
+# =========================
+- stage: ML_Tests
+  displayName: "Tests & Qualité ML"
+  jobs:
+    - job: MLTests
+      pool:
+        vmImage: "ubuntu-latest"
+
+      steps:
+        - task: UsePythonVersion@0
+          inputs:
+            versionSpec: "$(pythonVersion)"
+
+        - script: |
+            python -m pip install --upgrade pip
+            pip install -r backend/requirements.txt
+          displayName: "Install dependencies"
+
+        - script: |
+            python ml/utils/generate_dummy_dataset.py
+            python ml/training/train_diabetes.py
+          displayName: "Run ML training (sanity check)"
+
+        - script: |
+            python - <<EOF
+            import tensorflow as tf
+            tf.keras.models.load_model("ml/models/keras/diabetes_model.h5")
+            print("ML model OK")
+            EOF
+          displayName: "Validate trained model"
+
+# =========================
+# STAGE 2 — BUILD DOCKER
+# =========================
+- stage: Build
+  displayName: "Build & Push Docker Image"
+  dependsOn: ML_Tests
+  jobs:
+    - job: DockerBuild
+      pool:
+        vmImage: "ubuntu-latest"
+
+      steps:
+        - task: Docker@2
+          displayName: "Build and push image"
+          inputs:
+            command: buildAndPush
+            repository: $(imageName)
+            dockerfile: Dockerfile
+            containerRegistry: $(dockerRegistryServiceConnection)
+            tags: |
+              latest
+              $(Build.BuildId)
+
+# =========================
+# STAGE 3 — DEPLOY (ACI)
+# =========================
+- stage: Deploy
+  displayName: "Deploy to Azure Container Instances"
+  dependsOn: Build
+  jobs:
+    - job: DeployACI
+      pool:
+        vmImage: "ubuntu-latest"
+
+      steps:
+        - task: AzureCLI@2
+          displayName: "Deploy to ACI"
+          inputs:
+            azureSubscription: "AZURE_SUBSCRIPTION"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              az container create \
+                --resource-group healthguard-rg \
+                --name healthguard-api \
+                --image $(acrLoginServer)/$(imageName):latest \
+                --cpu 2 \
+                --memory 4 \
+                --registry-login-server $(acrLoginServer) \
+                --registry-username $ACR_USERNAME \
+                --registry-password $ACR_PASSWORD \
+                --ports 5000 \
+                --environment-variables FLASK_ENV=production

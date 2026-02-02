@@ -1,26 +1,18 @@
-from flask import Flask, request, jsonify
-import os
+from flask import Flask
+from flask_cors import CORS
+from backend.app.routes.predict import predict_bp
 
-app = Flask(__name__)
+def create_app():
+    app = Flask(__name__)
+    CORS(app)
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """pouverifier si l'application fonctionne correctement."""
-    return jsonify({"status": "healthy"}), 200
+    app.register_blueprint(predict_bp)
+
+    @app.route("/health")
+    def health():
+        return {"status": "ok"}
+
+    return app
 
 
-@app.route('/api/predict', methods=['POST'])
-def predict():
-    """endpoint principal pour la simulation du jour 1"""
-    return jsonify ({
-        "success": True,
-        "diagnosis": {
-            "diabetes_risk": 0.15,
-            "anemia_risk": 0.08,
-            "deficiency_risk": 0.022,
-        }
-    })
-    
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+app = create_app()
