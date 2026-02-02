@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HealthGuard - Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 640px; margin: 2rem auto; }
+    .result { margin-top: 1rem; padding: 1rem; border: 1px solid #ddd; background:#fafafa }
+    .loading { color: #888 }
+  </style>
+</head>
+<body>
+  <h1>HealthGuard - Démo</h1>
+  <p>Upload an image to run a quick inference.</p>
+
+  <form id="uploadForm">
+    <input type="file" id="fileInput" accept="image/*" />
+    <button type="submit">Upload & Predict</button>
+  </form>
+
+  <div id="status"></div>
+  <div id="result" class="result" style="display:none"></div>
+
+  <script>
+    const form = document.getElementById('uploadForm')
+    const fileInput = document.getElementById('fileInput')
+    const status = document.getElementById('status')
+    const result = document.getElementById('result')
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const file = fileInput.files[0]
+      if (!file) { alert('Select a file'); return }
+
+      status.textContent = 'Uploading...'
+      status.className = 'loading'
+      result.style.display = 'none'
+
+      const fd = new FormData()
+      fd.append('file', file)
+
+      try {
+        const res = await fetch('/api/predict', { method: 'POST', body: fd })
+        const json = await res.json()
+        status.textContent = ''
+        if (res.ok && json.success) {
+          result.style.display = 'block'
+          result.textContent = JSON.stringify(json.diagnosis, null, 2)
+        } else {
+          result.style.display = 'block'
+          result.textContent = 'Error: ' + (json.error || res.status)
+        }
+      } catch (err) {
+        status.textContent = ''
+        result.style.display = 'block'
+        result.textContent = 'Network error'
+      }
+    })
+  </script>
+</body>
+</html>
