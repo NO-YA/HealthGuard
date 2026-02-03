@@ -17,7 +17,12 @@ def test_health_check(client):
 
 
 def test_predict_valid_image(client):
-    data = {'file': (io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'\x00'*100), 'test.png')}
+    # Génère une vraie image PNG valide
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new('RGB', (32, 32), (255, 0, 0)).save(buf, format='PNG')
+    img = buf.getvalue()
+    data = {'file': (io.BytesIO(img), 'test.png')}
     r = client.post('/api/predict', data=data, content_type='multipart/form-data')
     assert r.status_code == 200
     json = r.get_json()

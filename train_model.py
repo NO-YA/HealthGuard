@@ -9,9 +9,10 @@ batch_size = 16
 
 # Prétraitement et augmentation de données
 data_augmentation = tf.keras.Sequential([
-    layers.RandomFlip("horizontal"),
-    layers.RandomRotation(0.1),
-    layers.RandomZoom(0.1),
+    layers.RandomFlip("horizontal_and_vertical"),
+    layers.RandomRotation(0.2),
+    layers.RandomZoom(0.2),
+    layers.RandomContrast(0.2),
 ])
 
 train_ds = tf.keras.utils.image_dataset_from_directory(
@@ -45,8 +46,13 @@ train_ds = train_ds.map(lambda x, y: (preprocess_input(x), y), num_parallel_call
 val_ds = val_ds.map(lambda x, y: (preprocess_input(x), y), num_parallel_calls=AUTOTUNE)
 
 # Base MobileNetV2
+
 base_model = MobileNetV2(input_shape=(224, 224, 3), include_top=False, weights="imagenet")
-base_model.trainable = False  # On ne réentraîne pas la base
+# Fine-tuning : on débloque les 20 dernières couches
+for layer in base_model.layers[:-20]:
+    layer.trainable = False
+for layer in base_model.layers[-20:]:
+    layer.trainable = True
 
 model = models.Sequential([
     data_augmentation,
@@ -81,7 +87,7 @@ early_stop = EarlyStopping(
 history = model.fit(
     train_ds,
     validation_data=val_ds,
-    epochs=25,
+    epochs=50,
     callbacks=[checkpoint, early_stop]
 )
 print("Historique d'entraînement :")

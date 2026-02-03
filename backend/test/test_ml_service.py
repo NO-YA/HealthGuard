@@ -53,9 +53,10 @@ def test_analyze_bytes_float_model():
     Image.new('RGB', (32, 32), (255, 0, 0)).save(buf, format='PNG')
     img = buf.getvalue()
     res = svc.analyze_bytes(img)
-    assert res["label"] in ("normal", "anemia")
-    assert 0.0 <= res["confidence"] <= 1.0
-    assert res["risk_level"] in ("low", "medium", "high")
+    diag = res["diagnosis"]
+    assert diag["label"] in ("normal", "anemia")
+    assert 0.0 <= diag["confidence"] <= 1.0
+    assert diag["risk_level"] in ("low", "medium", "high")
 
 
 def test_analyze_bytes_quantized_model():
@@ -66,8 +67,9 @@ def test_analyze_bytes_quantized_model():
     Image.new('RGB', (32, 32), (0, 255, 0)).save(buf, format='PNG')
     img = buf.getvalue()
     res = svc.analyze_bytes(img)
-    assert "raw" in res
-    assert isinstance(res["raw"], list)
+    diag = res["diagnosis"]
+    assert "raw_output" in diag
+    assert isinstance(diag["raw_output"], list)
 
 
 def test_invalid_image_raises():
